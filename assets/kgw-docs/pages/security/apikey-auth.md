@@ -57,7 +57,7 @@ Store your API keys in a Kubernetes secret so that you can reference it in an {{
 
 1. From your API management tool, generate an API key. The examples in this guide use `N2YwMDIxZTEtNGUzNS1jNzgzLTRkYjAtYjE2YzRkZGVmNjcy`.
 
-2. Create a Kubernetes secret to store your API key. 
+2. Create a Kubernetes secret to store your API key. Each entry in the secret's data is one API key, where the entry name identifies the client and the value is the key itself. To store keys for several clients, add one entry per client.
 
    ```yaml 
    kubectl apply -f - <<EOF
@@ -226,8 +226,7 @@ spec:
 EOF
 ```
 
-> [!IMPORTANT]
-> Each entry in a secret's data is one API key, where the entry name identifies the client and the value is the key itself. A secret can hold several entries, and a selector can match several secrets, so make sure that each key value is unique across all of them. If the same key value is stored under two different entry names, the {{< reuse "kgw-docs/snippets/trafficpolicy.md" >}} reports a `duplicate API key value` error in its status and API key auth is not applied. If the same key value is stored under the same entry name in more than one secret, the extra copies are ignored and no error is reported.
+A selector can match several secrets, and each secret can hold several API keys, so make sure that each key value is unique across all of them.{{< version include-if="2.5.x" >}} If the same key value is stored under two different entry names, the {{< reuse "kgw-docs/snippets/trafficpolicy.md" >}} reports a `duplicate API key value` error in its status and API key auth is not applied. If the same key value is stored under the same entry name in more than one secret, the extra copies are ignored and no error is reported.{{< /version >}}
 
 ### Secrets in another namespace
 
