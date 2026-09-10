@@ -609,6 +609,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `maxRequestSize` _[Quantity](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#quantity-resource-api)_ | MaxRequestSize sets the maximum size in bytes of a message body to buffer.<br />Requests exceeding this size will receive HTTP 413.<br />Example format: "1Mi", "512Ki", "1Gi" |  |  |
 | `disable` _[PolicyDisable](#policydisable)_ | Disable the buffer filter.<br />Can be used to disable buffer policies applied at a higher level in the config hierarchy. |  |  |
+| `filterStage` _[FilterStageSpec](#filterstagespec)_ | FilterStage specifies where in the HTTP filter chain the buffer filter is placed.<br />By default the buffer filter runs late in the chain, after authentication, authorization<br />and rate limiting, so that a request that is going to be rejected outright is rejected<br />before its body is buffered.<br /><br />`maxRequestSize` is only enforced while the buffer filter is the filter accumulating the<br />request body. A filter placed ahead of it that reads or holds the body first - for example<br />an ext_proc that waits on its server, or a body transformation - consumes the body before<br />the buffer filter ever sees it, and the limit is then inert. Move the buffer filter ahead<br />of such a filter to make the limit enforce, at the cost of buffering bodies that a later<br />authentication or authorization filter may go on to reject.<br /><br />The placement is a property of the whole filter chain rather than of a single route, and<br />setting it here affects every route on the listener. Envoy resolves the per-route buffer<br />config by filter name, and that name-based lookup is what lets a route-level policy override<br />a Gateway-level one, so the gateway installs exactly one buffer filter per filter chain. If<br />TrafficPolicies attached to the same listener ask for different stages, the earliest<br />requested stage is used for the whole chain. A policy that only sets `disable` takes no part<br />in that: it keeps its per-route override and leaves the placement to the policies that<br />actually buffer, so turning buffering off on one route never moves the buffer filter for the<br />others.<br /><br />Setting it therefore relaxes, never tightens, what the other routes on the listener do:<br />a route that asked for the default placement will have its bodies buffered before<br />authentication and authorization run, spending memory on requests those filters would go on<br />to reject. Keep buffer policies on a listener consistent, or split the listener, if that<br />matters for a route. The per-route `maxRequestSize` is unaffected and continues to apply<br />per route.<br /><br />When request decompression is configured on the same filter chain, the decompressor filters<br />stay ahead of the buffer filter, so that `maxRequestSize` is measured against the<br />decompressed body rather than the encoded bytes - otherwise a small compressed body would<br />satisfy the limit and expand past it upstream. Their default placement is already ahead of<br />every stage except `Fault`, so this only moves them when the buffer filter is staged at<br />`Fault`, and then it moves them for every route on the listener: request decompression on<br />those routes runs ahead of fault injection, CORS, and any ext_proc staged at `Fault`.<br /><br />`filterStage.weight` must be 0: it breaks ties between several filters of the same type at<br />one stage, and a filter chain carries at most one buffer filter. |  |  |
 
 
 #### CELFilter
@@ -803,6 +804,22 @@ _Appears in:_
 | `Gzip` | CompressionGzip selects the gzip compressor.<br /> |
 | `Brotli` | CompressionBrotli selects the brotli compressor.<br /> |
 | `Zstd` | CompressionZstd selects the zstd compressor.<br /> |
+
+
+#### ConnectConfig
+
+
+
+ConnectConfig specifies how CONNECT requests are forwarded upstream.
+
+
+
+_Appears in:_
+- [ProtocolUpgradeConfig](#protocolupgradeconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `terminate` _boolean_ | Terminate causes the gateway to terminate the CONNECT request and forward<br />the request payload upstream as raw TCP data. When false or omitted, the<br />CONNECT request is proxied upstream without termination.<br /><br />Because the payload is forwarded as raw bytes, configuring TLS for the<br />selected backend wraps those bytes in a separate upstream TLS session. Leave<br />backend TLS disabled when the payload must reach the upstream unchanged. |  |  |
 
 
 #### ConnectionKeepalive
@@ -1447,6 +1464,7 @@ be placed.
 
 
 _Appears in:_
+- [Buffer](#buffer)
 - [ExtProcProvider](#extprocprovider)
 
 | Field | Description | Default | Validation |
@@ -3140,6 +3158,23 @@ _Appears in:_
 | `responseTrailerMode` _string_ | ResponseTrailerMode determines how to handle the response trailers | SKIP | Enum: [DEFAULT SEND SKIP] <br /> |
 
 
+#### ProtocolUpgradeConfig
+
+
+
+ProtocolUpgradeConfig specifies configuration for an HTTP protocol upgrade.
+
+
+
+_Appears in:_
+- [TrafficPolicySpec](#trafficpolicyspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `type` _string_ | Type is the case-insensitive protocol upgrade token, such as "websocket",<br />"CONNECT", or "spdy/3.1". Do not configure the same token more than once,<br />including variants that differ only by letter case. |  | MaxLength: 256 <br />MinLength: 1 <br /> |
+| `connect` _[ConnectConfig](#connectconfig)_ | Connect configures CONNECT-specific behavior. It is valid only when type<br />is "CONNECT". |  |  |
+
+
 #### ProxyDeployment
 
 
@@ -3323,6 +3358,7 @@ _Appears in:_
 | `cacheDuration` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#duration-v1-meta)_ | Duration after which the cached JWKS expires.<br />If unspecified, the default cache duration is 5 minutes. |  | MaxLength: 32 <br />Type: string <br /> |
 | `asyncFetch` _[JWKSAsyncFetch](#jwksasyncfetch)_ | AsyncFetch configures fetching the JWKS asynchronously and caching it on a timer,<br />instead of fetching it on demand during request handling. |  |  |
 | `retryPolicy` _[JWKSRetryPolicy](#jwksretrypolicy)_ | RetryPolicy configures how the JWKS fetch is retried (with exponential backoff)<br />when the remote JWKS server is unavailable. |  |  |
+| `timeout` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#duration-v1-meta)_ | Timeout for fetching the remote JWKS. If not specified, defaults to 5s. |  | MaxLength: 32 <br />Type: string <br /> |
 
 
 #### RequestDecompression
@@ -4020,6 +4056,7 @@ _Appears in:_
 | `requestMirror` _[RequestMirrorPolicy](#requestmirrorpolicy)_ | RequestMirror configures the behavior of request mirrors defined by<br />HTTPRoute or GRPCRoute RequestMirror filters. It does not create request mirrors.<br />It can target HTTPRoutes, GRPCRoutes, or Gateways (including individual Gateway listeners<br />via sectionName). When attached above the route level it applies to every mirror on the<br />routes it covers, and a more-specific policy wins the whole block: its settings are not<br />combined field-by-field with a less-specific policy. If a covered route has no request<br />mirror, this has no effect. |  | MinProperties: 1 <br /> |
 | `autoHostRewrite` _boolean_ | AutoHostRewrite rewrites the Host header to the DNS name of the selected upstream.<br />NOTE: This field is only honored for HTTPRoute targets.<br />NOTE: If `autoHostRewrite` is set on a route that also has a [URLRewrite filter](https://gateway-api.sigs.k8s.io/reference/api-spec/main/spec/#httpurlrewritefilter)<br />configured to override the `hostname`, the `hostname` value will be used and `autoHostRewrite` will be ignored. |  |  |
 | `buffer` _[Buffer](#buffer)_ | Buffer can be used to set the maximum request size that will be buffered.<br />Requests exceeding this size will return a 413 response. |  |  |
+| `httpUpgrade` _[ProtocolUpgradeConfig](#protocolupgradeconfig) array_ | HTTPUpgrade configures HTTP protocol upgrades on the targeted routes.<br />Route-level upgrade settings override the matching upgrade type configured<br />on the listener. CONNECT termination is applied per route and cannot be<br />configured on a listener. After an upgrade is established, tunneled payload<br />is not inspected by HTTP filters. Authenticate and authorize the initial<br />upgrade request, enable upgrades only for trusted clients, and avoid request<br />buffering. |  | MaxItems: 16 <br /> |
 | `timeouts` _[Timeouts](#timeouts)_ | Timeouts defines the timeouts for requests.<br />It is applicable to HTTPRoutes, GRPCRoutes, and Gateways (including individual<br />Gateway listeners via sectionName), and ignored for other targeted kinds.<br />When attached above the route level, the timeouts apply to all routes it<br />covers; a route-level timeout (from a more specific TrafficPolicy or the<br />built-in HTTPRoute timeouts) takes precedence. |  |  |
 | `retry` _[Retry](#retry)_ | Retry defines the policy for retrying requests.<br />It is applicable to HTTPRoutes, GRPCRoutes, Gateways, Gateway listeners, and<br />ListenerSets, and ignored for other targeted kinds.<br />When attached above the route level, the retry policy applies to all routes it<br />covers; a route-level retry policy (from a more specific TrafficPolicy or the<br />built-in HTTPRoute retry) takes precedence. |  |  |
 | `internalRedirect` _[InternalRedirect](#internalredirect)_ | InternalRedirect handles upstream 3xx redirects inside the gateway.<br />Applies only to routes that forward traffic to a backend. |  |  |
@@ -4106,7 +4143,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `enabledUpgrades` _string array_ | List of upgrade types to enable (e.g. "websocket", "CONNECT", etc.) |  | MinItems: 1 <br /> |
+| `enabledUpgrades` _string array_ | EnabledUpgrades lists the HTTP upgrade types to enable, such as "websocket"<br />and "CONNECT". Enabling "CONNECT" allows CONNECT requests to be proxied<br />upstream without termination. To terminate CONNECT and forward its payload<br />as raw TCP data, configure httpUpgrade in a TrafficPolicy. |  | MinItems: 1 <br /> |
 
 
 #### UpstreamProxyProtocol
