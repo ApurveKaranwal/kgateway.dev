@@ -1,5 +1,20 @@
+'''Guards `.docs-test.toml` against drifting away from `versions.json`.
+
+`versions.json` is the single source of truth for which doc versions this repo
+builds. `.docs-test.toml` repeats that list for the Playwright harness, and
+nothing tied the two together, so the lists silently diverged: `2.3.x` shipped
+without ever being added, and a long-dead `2.0.x` stayed behind. This test is
+the tie.
+
+The drift was not caught sooner because the framework-tests workflow still runs
+with `continue-on-error: true`. The spec that asserts every configured version
+appears in the version dropdown did fail on the phantom `2.0.x` — the job just
+did not report it. Keep that in mind before relying on this test alone: it only
+blocks a merge while `scripts-tests` is a required check.
+'''
+
 import json
-import re
+import tomllib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -9,9 +24,10 @@ def test_docs_test_toml_versions_match_active_versions():
     """Verify that .docs-test.toml [versioning].versions matches versions.json.
 
     The Playwright testing harness in solo-io/docs-theme-extras relies on
-    .docs-test.toml to determine which version trees to scan. If an active
-    version is missing from .docs-test.toml, its documentation is silently
-    skipped by CI framework testing.
+    .docs-test.toml to decide which version trees the per-version specs
+    synthesize URLs for. A version missing from the list is never checked by
+    those specs; a version present but not built makes them chase pages that
+    do not exist.
     """
     versions_json_path = REPO_ROOT / "versions.json"
     assert versions_json_path.exists(), "versions.json does not exist"
@@ -20,21 +36,25 @@ def test_docs_test_toml_versions_match_active_versions():
 
     docs_test_path = REPO_ROOT / ".docs-test.toml"
     assert docs_test_path.exists(), ".docs-test.toml does not exist"
-    content = docs_test_path.read_text(encoding="utf-8")
+    config = tomllib.loads(docs_test_path.read_text(encoding="utf-8"))
 
-    match = re.search(r"\[versioning\][\s\S]*?versions\s*=\s*\[(.*?)\]", content)
-    assert match, "Could not find [versioning].versions in .docs-test.toml"
+    versioning = config.get("versioning")
+    assert versioning is not None, "[versioning] table is missing from .docs-test.toml"
+    actual_versions = versioning.get("versions")
+    assert actual_versions is not None, (
+        "[versioning].versions is missing from .docs-test.toml"
+    )
 
-    actual_versions = [
-        s.strip().strip('"\'')
-        for s in match.group(1).split(",")
-        if s.strip()
-    ]
-
+    # ORDER IS PART OF THE CONTRACT. Do not relax this to a set or a sorted
+    # comparison because the "Missing"/"Obsolete" wording below reads like a set
+    # difference. The harness treats `versions[0]` as the version its dropdown
+    # navigation test clicks through to, so `versions.json` order (newest first,
+    # `main` then `latest`) has to survive into `.docs-test.toml` verbatim.
     assert actual_versions == expected_link_versions, (
         f".docs-test.toml [versioning].versions does not match active versions in versions.json.\n"
         f"Configured: {actual_versions}\n"
         f"Expected:   {expected_link_versions}\n"
         f"Missing:    {[v for v in expected_link_versions if v not in actual_versions]}\n"
-        f"Obsolete:   {[v for v in actual_versions if v not in expected_link_versions]}"
+        f"Obsolete:   {[v for v in actual_versions if v not in expected_link_versions]}\n"
+        f"Order:      {'differs' if sorted(actual_versions) == sorted(expected_link_versions) else 'n/a'}"
     )
