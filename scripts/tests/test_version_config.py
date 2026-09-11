@@ -6,11 +6,18 @@ nothing tied the two together, so the lists silently diverged: `2.3.x` shipped
 without ever being added, and a long-dead `2.0.x` stayed behind. This test is
 the tie.
 
-The drift was not caught sooner because the framework-tests workflow still runs
-with `continue-on-error: true`. The spec that asserts every configured version
-appears in the version dropdown did fail on the phantom `2.0.x` — the job just
-did not report it. Keep that in mind before relying on this test alone: it only
-blocks a merge while `scripts-tests` is a required check.
+Nothing in CI could have caught this, which is why the check belongs here. The
+framework-tests workflow runs only the harness's `static` and `content`
+projects. The spec that asserts every configured version appears in the version
+dropdown lives in the `browser` project, which that workflow never invokes. The
+`static` specs that do read this list — auto-cards, card-image, custom-alert —
+either generate no tests at all or skip outright when pointed at a consumer's
+own build rather than the harness fixture. The drift was invisible by
+construction, not merely unreported.
+
+One caveat before relying on this test: it only blocks a merge while
+`scripts-tests` is a required check, and as of this commit the `main` ruleset
+requires only `DCO`.
 '''
 
 import json
